@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+
+{% block body %}
+<div class="auth">
+    <section class="auth-art">
+        <a class="brand" href="/login/">Isha's <b>Academy</b></a>
+        <div>
+            <h2>Classes, homework and grades in one place.</h2>
+            <ul>
+                <li><strong>Students</strong> join classes and hand in homework.</li>
+                <li><strong>Teachers</strong> set work, take attendance and give grades.</li>
+                <li><strong>Parents</strong> follow their child's results.</li>
+            </ul>
+        </div>
+        <p class="muted">Sign in with the account you registered for your school.</p>
+    </section>
+    <section class="auth-form">
+        <div class="auth-card">
+            {% block form %}{% endblock %}
+        </div>
+    </section>
+</div>
+{% endblock %}

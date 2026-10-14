@@ -1,0 +1,26 @@
+{% extends 'auth_base.html' %}
+
+{% block title %}Log in | Isha's Academy{% endblock %}
+{% block page %}login{% endblock %}
+
+{% block form %}
+<div>
+    <h1>Welcome back</h1>
+    <p class="sub">Log in to see your dashboard.</p>
+</div>
+
+<div id="login-banner" hidden></div>
+
+<form id="login-form" class="stack" novalidate>
+    <label class="field">Email
+        <input type="email" id="email" autocomplete="email" required>
+    </label>
+    <label class="field">Password
+        <input type="password" id="password" autocomplete="current-password" required>
+    </label>
+    <div id="login-error" class="alert" role="alert" hidden></div>
+    <button class="btn block" type="submit" id="login-btn">Log in</button>
+</form>
+
+<p class="auth-foot">New here? <a href="/register/">Create an account</a></p>
+{% endblock %}

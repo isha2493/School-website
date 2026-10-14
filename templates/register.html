@@ -1,0 +1,65 @@
+{% extends 'auth_base.html' %}
+
+{% block title %}Create account | Isha's Academy{% endblock %}
+{% block page %}register{% endblock %}
+
+{% block form %}
+<div id="register-wrap" class="stack">
+    <div>
+        <h1>Create your account</h1>
+        <p class="sub">Choose your role first. The form changes to match.</p>
+    </div>
+
+    <form id="register-form" class="stack" novalidate>
+        <div class="seg" role="radiogroup" aria-label="I am a">
+            <label><input type="radio" name="role" value="student" checked><span>Student</span></label>
+            <label><input type="radio" name="role" value="teacher"><span>Teacher</span></label>
+            <label><input type="radio" name="role" value="parent"><span>Parent</span></label>
+        </div>
+
+        <label class="field">Full name
+            <input type="text" id="username" autocomplete="name" required>
+        </label>
+        <label class="field">Email
+            <input type="email" id="email" autocomplete="email" required>
+        </label>
+        <label class="field">Password
+            <input type="password" id="password" autocomplete="new-password" required>
+        </label>
+
+        <label class="field">Profile photo (optional)
+            <input type="file" id="photo" accept="image/*">
+        </label>
+
+        <fieldset class="stack" data-role="student">
+            <div class="two">
+                <label class="field">Class
+                    <input type="number" id="student_class" min="1" placeholder="e.g. 8" required>
+                </label>
+                <label class="field">Roll number
+                    <input type="number" id="roll_no" min="1" placeholder="e.g. 14" required>
+                </label>
+            </div>
+        </fieldset>
+
+        <fieldset class="stack" data-role="parent" disabled hidden>
+            <label class="field">Your child
+                <select id="child"><option value="">Loading students…</option></select>
+                <span class="hint" id="child-hint">Pick the student who is your child.</span>
+            </label>
+        </fieldset>
+
+        <div id="register-error" class="alert" role="alert" hidden></div>
+        <button class="btn block" type="submit" id="register-btn">Create account</button>
+    </form>
+
+    <p class="auth-foot">Already registered? <a href="/login/">Log in</a></p>
+</div>
+
+<div id="register-done" class="stack" hidden>
+    <div class="alert ok" role="status">Your account has been created.</div>
+    <h1>You're all set</h1>
+    <p class="sub">Log in with your email and password to open your dashboard.</p>
+    <a class="btn block" href="/login/?registered=1">Go to login</a>
+</div>
+{% endblock %}

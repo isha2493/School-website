@@ -3,12 +3,8 @@ from django.db import models
 
 class Person(models.Model):
     username = models.CharField(max_length=100)
-    email = models.EmailField()
-    password = models.CharField(
-        max_length=120,
-        blank=True,
-        null=True
-    )
+    email = models.EmailField(unique=True)
+    password = models.CharField(max_length=120, blank=True, null=True)
 
     ROLE_CHOICES = [
         ('student', 'Student'),
@@ -25,6 +21,12 @@ class Person(models.Model):
     role = models.CharField(
         max_length=20,
         choices=ROLE_CHOICES
+    )
+
+    profile_picture = models.ImageField(
+    upload_to='profile_pictures/',
+    blank=True,
+    null=True
     )
 
     def __str__(self):

@@ -13,7 +13,7 @@ class JWTAuthentication(BaseAuthentication):
         auth_header = request.headers.get('Authorization')
 
         if not auth_header:
-            return None
+            raise AuthenticationFailed('Token required')
 
         try:
             token = auth_header.split(' ')[1]

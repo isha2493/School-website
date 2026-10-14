@@ -1,31 +1,54 @@
-"""
-URL configuration for school_management project.
-
-The `urlpatterns` list routes URLs to views. For more information please see:
-    https://docs.djangoproject.com/en/6.1/topics/http/urls/
-Examples:
-Function views
-    1. Add an import:  from my_app import views
-    2. Add a URL to urlpatterns:  path('', views.home, name='home')
-Class-based views
-    1. Add an import:  from other_app.views import Home
-    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
-Including another URLconf
-    1. Import the include() function: from django.urls import include, path
-    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
-"""
 from django.contrib import admin
 from django.urls import path, include
+from django.shortcuts import render, redirect
+from django.conf import settings
+from django.conf.urls.static import static
+
+
+def home(request):
+    return redirect('login-page')
+
+
+def login_page(request):
+    return render(request, 'login.html')
+
+
+def register_page(request):
+    return render(request, 'register.html')
+
+
+def dashboard_page(request, role):
+    if role not in ['student', 'teacher', 'parent']:
+        return redirect('login-page')
+
+    return render(request, f'{role}_dashboard.html')
+
+
+def notices_page(request):
+    return render(request, 'notices.html')
 
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('', home, name='home'),
+    path('login/', login_page, name='login-page'),
+    path('register/', register_page, name='register-page'),
+    path(
+        '<str:role>-dashboard/',
+        dashboard_page,
+        name='dashboard-page'
+    ),
+    path('notices/', notices_page, name='notices-page'),
 
+    
     path('api/students/', include('students.urls')),
     path('api/parents/', include('parents.urls')),
     path('api/teachers/', include('teachers.urls')),
     path('api/auth/', include('authentication.urls')),
     path('api/assignments/', include('assignments.urls')),
+    path('api/class/', include('classes.urls')),
+    path('api/notices/', include('notices.urls')),
 ]
 
 
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
