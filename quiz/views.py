@@ -312,7 +312,7 @@ class SubmitView(APIView):
 
         existing_submission = Submit.objects.filter(
             student=student,
-            question__quiz=question.quiz
+            question=question
          ).exists()
 
         if existing_submission:
