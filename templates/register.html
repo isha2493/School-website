@@ -6,17 +6,11 @@
 {% block form %}
 <div id="register-wrap" class="stack">
     <div>
-        <h1>Create your account</h1>
-        <p class="sub">Choose your role first. The form changes to match.</p>
+        <h1>Create your teacher account</h1>
+        <p class="sub">Teachers sign up here. Students and parents are registered by their teacher, then log in with the email and password they were given.</p>
     </div>
 
-    <form id="register-form" class="stack" novalidate>
-        <div class="seg" role="radiogroup" aria-label="I am a">
-            <label><input type="radio" name="role" value="student" checked><span>Student</span></label>
-            <label><input type="radio" name="role" value="teacher"><span>Teacher</span></label>
-            <label><input type="radio" name="role" value="parent"><span>Parent</span></label>
-        </div>
-
+    <form id="register-form" class="stack" novalidate onsubmit="return false;">
         <label class="field">Full name
             <input type="text" id="username" autocomplete="name" required>
         </label>
@@ -31,24 +25,6 @@
             <input type="file" id="photo" accept="image/*">
         </label>
 
-        <fieldset class="stack" data-role="student">
-            <div class="two">
-                <label class="field">Class
-                    <input type="number" id="student_class" min="1" placeholder="e.g. 8" required>
-                </label>
-                <label class="field">Roll number
-                    <input type="number" id="roll_no" min="1" placeholder="e.g. 14" required>
-                </label>
-            </div>
-        </fieldset>
-
-        <fieldset class="stack" data-role="parent" disabled hidden>
-            <label class="field">Your child
-                <select id="child"><option value="">Loading students…</option></select>
-                <span class="hint" id="child-hint">Pick the student who is your child.</span>
-            </label>
-        </fieldset>
-
         <div id="register-error" class="alert" role="alert" hidden></div>
         <button class="btn block" type="submit" id="register-btn">Create account</button>
     </form>
@@ -57,9 +33,9 @@
 </div>
 
 <div id="register-done" class="stack" hidden>
-    <div class="alert ok" role="status">Your account has been created.</div>
+    <div class="alert ok" role="status">Your teacher account has been created.</div>
     <h1>You're all set</h1>
-    <p class="sub">Log in with your email and password to open your dashboard.</p>
+    <p class="sub">Log in with your email and password to open your teacher dashboard.</p>
     <a class="btn block" href="/login/?registered=1">Go to login</a>
 </div>
 {% endblock %}

@@ -44,7 +44,8 @@ INSTALLED_APPS = [
     'authentication',
     'assignments',
     'classes',
-    'notices'
+    'notices',
+    'quiz'
 ]
 
 

@@ -1,12 +1,32 @@
 (() => {
     "use strict";
+    window.__schoolApp = "v3";
+
+    // If anything in this script breaks, show the reason on the page
+    // (a red box at the bottom) instead of failing silently.
+    let shownFatal = false;
+    function showFatal(message) {
+        if (shownFatal || !document.body) return;
+        shownFatal = true;
+        const box = document.createElement("div");
+        box.className = "alert";
+        box.setAttribute("role", "alert");
+        box.style.cssText = "position:fixed;left:1rem;right:1rem;bottom:1rem;z-index:99;max-width:640px;margin:0 auto";
+        box.textContent = "Script error: " + message + "  (please send me this message)";
+        document.body.appendChild(box);
+    }
+    window.addEventListener("error", (e) => showFatal(e.message));
+    window.addEventListener("unhandledrejection", (e) => showFatal((e.reason && e.reason.message) || String(e.reason)));
 
     /* ------------------------------------------------------------------
        API addresses (all of these already exist in your Django project)
     ------------------------------------------------------------------ */
     const API = {
         login: "/api/auth/login/",
-        register: "/api/auth/register/",
+        register: "/api/auth/teacher/register/",
+        studentRegister: "/api/auth/students/register/",
+        parentRegister: "/api/auth/parents/register/",
+        studentCsv: "/api/students/registerstud",
         students: "/api/students/",
         teachers: "/api/teachers/",
         parents: "/api/parents/",
@@ -19,9 +39,17 @@
         notices: "/api/notices/",
         profile: "/api/auth/profile/",
         profileUpdate: "/api/auth/profile/update/",
+        quizzes: "/api/quiz/quiz/",
+        quizQuestions: "/api/quiz/question/",
+        quizOptions: "/api/quiz/option/",
+        quizGrades: "/api/quiz/grades/",
+        quizSubmits: "/api/quiz/submits/",
     };
     const classStudents = (id) => `/api/class/${id}/students/`;
     const classStudent = (id, sid) => `/api/class/${id}/students/${sid}/`;
+    const questionsOf = (quizId) => `${API.quizQuestions}?quiz_id=${quizId}`;
+    const optionsOf = (questionId) => `${API.quizOptions}?question_id=${questionId}`;
+    const submitsOf = (quizId) => `${API.quizSubmits}?quiz_id=${quizId}`;
 
     const ROLE_LABEL = { student: "Student", teacher: "Teacher", parent: "Parent" };
 
@@ -64,6 +92,17 @@
     function fmtDate(value) {
         const d = new Date(`${value}T00:00:00`);
         return isNaN(d) ? value : d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    }
+
+    function fmtDateTime(value) {
+        const d = new Date(value);
+        return isNaN(d) ? value : d.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+    }
+
+    // "Right now" in the format a date-and-time box wants
+    function nowLocal() {
+        const d = new Date();
+        return new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     }
 
     function toast(message, kind = "") {
@@ -245,6 +284,25 @@
                 c.grade_level ? h("span", { class: "chip" }, `Grade ${c.grade_level}`) : null,
                 h("span", { class: "chip" }, `${c.students.length} ${c.students.length === 1 ? "student" : "students"}`)),
             h("div", { class: "actions" }, actions));
+    }
+
+    /* ------------------------------------------------------------------
+       Quiz helpers (used by students and teachers)
+    ------------------------------------------------------------------ */
+    const isClosed = (quiz) => new Date(quiz.due_date) < new Date();
+    const marksText = (n) => `${n} ${n === 1 ? "mark" : "marks"}`;
+
+    // Adds up one student's marks for the questions of one quiz
+    function quizScore(questions, grades) {
+        const given = new Map(grades.map((g) => [g.question, g.grade]));
+        const marked = questions.filter((q) => given.has(q.id));
+        return {
+            given,
+            total: questions.reduce((sum, q) => sum + q.marks, 0),
+            got: marked.reduce((sum, q) => sum + given.get(q.id), 0),
+            marked: marked.length,
+            all: questions.length > 0 && marked.length === questions.length,
+        };
     }
 
     /* ------------------------------------------------------------------
@@ -473,7 +531,52 @@
             },
         },
 
+        quizzes: {
+            label: "Quizzes",
+            async render(box, ctx) {
+                box.append(pageHead("Quizzes", "Quizzes for the classes you've joined."));
+                const [qz, g] = await Promise.all([api(API.quizzes), api(API.quizGrades)]);
+                if (!qz.ok) return box.append(errorBox(qz.error));
+                if (!qz.data.length) {
+                    return box.append(empty("No quizzes available", "When a teacher sets a quiz for your class, it will show up here."));
+                }
+
+                const grades = arr(g);
+                // Load the questions of every quiz so each one can show its score
+                const sets = await Promise.all(qz.data.map((x) => api(questionsOf(x.id))));
+                const sorted = qz.data
+                    .map((quiz, i) => ({ quiz, questions: arr(sets[i]) }))
+                    .sort((a, b) => new Date(a.quiz.due_date) - new Date(b.quiz.due_date));
+
+                box.append(h("div", { class: "list" }, sorted.map(({ quiz, questions }) => {
+                    const closed = isClosed(quiz);
+                    const score = quizScore(questions, grades);
+                    const info = h("div", { class: "side-info" });
+
+                    if (score.marked) {
+                        info.append(h("span", { class: "chip ok", title: "Your score" },
+                            score.all ? `Score ${score.got} / ${score.total}` : `Marked so far ${score.got} / ${score.total}`));
+                    }
+                    info.append(h("button", {
+                        class: `btn sm ${closed ? "ghost" : ""}`, type: "button",
+                        onclick: () => openQuiz(quiz, ctx),
+                    }, closed ? "View quiz" : "Take quiz"));
+
+                    return h("div", { class: "item" },
+                        h("div", {},
+                            h("h3", {}, quiz.title),
+                            quiz.description ? h("p", {}, quiz.description) : null,
+                            h("div", { class: "chips" },
+                                quiz.class_name ? h("span", { class: "chip" }, quiz.class_name) : null,
+                                h("span", { class: "chip" }, `${questions.length} ${questions.length === 1 ? "question" : "questions"}`),
+                                h("span", { class: `chip ${closed ? "late" : ""}` }, `${closed ? "Closed" : "Due"} ${fmtDateTime(quiz.due_date)}`))),
+                        info);
+                })));
+            },
+        },
+
         notices: noticesView(false),
+        profile: profileView("student"),        notices: noticesView(false),
         profile: profileView("student"),
     };
 
@@ -506,6 +609,81 @@
                 h("label", { class: "field" }, "Your homework", text),
                 picture.node,
                 h("div", {}, send)));
+    }
+
+    // The window where a student answers a quiz
+    function openQuiz(quiz, ctx) {
+        const body = h("div", {}, "Loading…");
+        const { dlg } = dialog(quiz.title, body);
+        const closed = isClosed(quiz);
+
+        (async () => {
+            const [qs, gr, sb] = await Promise.all([api(questionsOf(quiz.id)), api(API.quizGrades), api(submitsOf(quiz.id))]);
+            if (!qs.ok) return body.replaceChildren(errorBox(qs.error));
+            if (!qs.data.length) {
+                return body.replaceChildren(empty("No questions yet", "Your teacher hasn't added questions to this quiz."));
+            }
+
+            const optionSets = await Promise.all(qs.data.map((q) => api(optionsOf(q.id))));
+            const failed = optionSets.find((r) => !r.ok);
+            if (failed) return body.replaceChildren(errorBox(failed.error));
+
+            const given = quizScore(qs.data, arr(gr)).given;
+            // What this student already answered (so the choices are ticked again)
+            const before = new Map(arr(sb).map((x) => [x.question, x.selected_option]));
+            const names = qs.data.map((q) => `quiz-${quiz.id}-question-${q.id}`);
+
+            const blocks = qs.data.map((q, i) => {
+                const marked = given.has(q.id);
+                return h("div", { class: "q-block", role: "radiogroup", "aria-label": `Question ${i + 1}` },
+                    h("div", { class: "q-head" },
+                        h("h3", {}, `${i + 1}. ${q.question_text}`),
+                        h("span", { class: marked ? "chip ok" : "chip" },
+                            marked ? `${given.get(q.id)} / ${q.marks}` : marksText(q.marks))),
+                    q.question_picture ? thumb(q.question_picture, `Question ${i + 1}: picture`) : null,
+                    h("div", { class: "opts" }, optionSets[i].data.map((o) =>
+                        h("label", { class: "opt" },
+                            h("input", { type: "radio", name: names[i], value: o.id, disabled: closed, checked: before.get(q.id) === o.id }),
+                            h("span", {}, o.option_text)))));
+            });
+
+            const send = h("button", { class: "btn", type: "submit" }, "Submit answers");
+            const form = h("form", {
+                class: "stack",
+                onsubmit: (e) => {
+                    e.preventDefault();
+                    const chosen = qs.data.map((q, i) => {
+                        const picked = form.querySelector(`input[name="${names[i]}"]:checked`);
+                        return picked ? { question: q.id, selected_option: Number(picked.value) } : null;
+                    }).filter(Boolean);
+
+                    if (!chosen.length) return toast("Pick at least one answer first.", "bad");
+                    if (chosen.length < qs.data.length &&
+                        !confirm(`You answered ${chosen.length} of ${qs.data.length} questions. Submit anyway?`)) return;
+
+                    busy(send, async () => {
+                        // One at a time, so we stop at the first problem (for example a closed quiz)
+                        for (const answer of chosen) {
+                            const r = await api(API.quizSubmits, { method: "POST", body: answer });
+                            if (!r.ok) return toast(r.error, "bad");
+                        }
+                        toast(`${chosen.length} ${chosen.length === 1 ? "answer" : "answers"} submitted`);
+                        dlg.close();
+                        ctx.refresh();
+                    });
+                },
+            },
+                closed
+                    ? h("div", { class: "alert", role: "status" }, "This quiz has closed, so answers can no longer be sent.")
+                    : h("p", { class: "muted" },
+                        before.size
+                            ? `You have already answered ${before.size} of ${qs.data.length}. You can change your answers until ${fmtDateTime(quiz.due_date)}.`
+                            : `Due ${fmtDateTime(quiz.due_date)}. You can send your answers again until then.`),
+                blocks,
+                closed ? null : h("div", {}, send));
+
+            body.replaceChildren(form);
+        })();
     }
 
     /* ------------------------------------------------------------------
@@ -611,7 +789,402 @@
         load();
     }
 
+    // Upload many students at once from a CSV file
+    function csvPanel() {
+        const file = h("input", { type: "file", accept: ".csv,text/csv" });
+        const send = h("button", { class: "btn", type: "submit" }, "Upload CSV");
+        const result = h("div", { class: "stack" });
+
+        function downloadSample() {
+            const text = "username,email,password,role,roll_no,student_class\n" +
+                "Asha Rai,asha@example.com,Temp1234,student,14,8\n";
+            const link = h("a", {
+                href: URL.createObjectURL(new Blob([text], { type: "text/csv" })),
+                download: "students_sample.csv",
+            });
+            document.body.append(link);
+            link.click();
+            link.remove();
+        }
+
+        return h("form", {
+            class: "panel stack",
+            onsubmit: (e) => {
+                e.preventDefault();
+                const f = file.files[0];
+                if (!f) return toast("Choose a CSV file first.", "bad");
+                if (!/\.csv$/i.test(f.name)) return toast("Please choose a .csv file.", "bad");
+
+                busy(send, async () => {
+                    const fd = new FormData();
+                    fd.append("file", f);
+                    const r = await api(API.studentCsv, { method: "POST", form: fd });
+                    if (!r.ok) return toast(r.error, "bad");
+
+                    const count = r.data.registered || 0;
+                    const errors = r.data.errors || [];
+                    result.replaceChildren(
+                        h("div", { class: count ? "alert ok" : "alert", role: "status" },
+                            `${count} ${count === 1 ? "student" : "students"} registered.`),
+                        errors.length
+                            ? h("div", { class: "alert", role: "alert" },
+                                h("strong", {}, `${errors.length} ${errors.length === 1 ? "row was" : "rows were"} skipped:`),
+                                h("ul", {}, errors.map((msg) => h("li", {}, msg))))
+                            : null);
+                    toast(count ? "CSV processed" : "No students were registered", count ? "" : "bad");
+                    file.value = "";
+                });
+            },
+        },
+            h("h2", {}, "Register many students (CSV)"),
+            h("p", { class: "muted" }, "Upload one file to create several student accounts. Every student gets the role Student automatically."),
+            h("p", { class: "hint" }, "Columns needed, in any order: username, email, password, role, roll_no, student_class. The role column must say student, and roll_no and student_class must be numbers."),
+            h("label", { class: "field" }, "CSV file", file),
+            h("div", { class: "row-actions", style: "display:flex;gap:.6rem;flex-wrap:wrap" },
+                send,
+                h("button", { class: "btn ghost", type: "button", onclick: downloadSample }, "Download sample CSV")),
+            result);
+    }
+
+    // Shows one quiz's questions and lets the teacher add more
+    function openQuestions(quiz, ctx) {
+        const body = h("div", { class: "stack" }, "Loading…");
+        dialog(`${quiz.title}: questions`, body);
+
+        function addForm() {
+            const text = h("textarea", { required: true, placeholder: "Type the question" });
+            const marks = h("input", { type: "number", required: true, min: "1", step: "1", value: "1" });
+            const picture = pictureField("Picture (optional)");
+            const radioName = `correct-${quiz.id}`;
+            const rows = [];
+            const optionBox = h("div", { class: "stack" });
+            const submit = h("button", { class: "btn", type: "submit" }, "Add question");
+
+            function addRow() {
+                const n = rows.length + 1;
+                const radio = h("input", { type: "radio", name: radioName, "aria-label": `Option ${n} is the correct answer` });
+                const input = h("input", { type: "text", maxLength: 200, placeholder: `Option ${n}`, "aria-label": `Option ${n} text` });
+                rows.push({ radio, input });
+                optionBox.append(h("div", { class: "option-row" }, radio, input));
+            }
+            for (let i = 0; i < 4; i++) addRow();
+
+            const more = h("button", {
+                class: "btn sm ghost", type: "button",
+                onclick: () => { addRow(); if (rows.length >= 6) more.hidden = true; },
+            }, "Add another option");
+
+            return h("form", {
+                class: "panel stack",
+                style: "margin:0",
+                onsubmit: (e) => {
+                    e.preventDefault();
+                    const problem = pictureProblem(picture.file);
+                    if (problem) return toast(problem, "bad");
+
+                    const filled = rows.filter((r) => r.input.value.trim());
+                    if (filled.length < 2) return toast("Give at least two options.", "bad");
+                    if (filled.filter((r) => r.radio.checked).length !== 1) {
+                        return toast("Tick the option that is the correct answer (and type its text).", "bad");
+                    }
+
+                    busy(submit, async () => {
+                        const q = await sendWithPicture(
+                            API.quizQuestions,
+                            { quiz: quiz.id, question_text: text.value.trim(), marks: Number(marks.value) },
+                            "question_picture",
+                            picture.file);
+                        if (!q.ok) return toast(q.error, "bad");
+
+                        for (const row of filled) {
+                            const o = await api(API.quizOptions, {
+                                method: "POST",
+                                body: { question: q.data.id, option_text: row.input.value.trim(), is_correct: row.radio.checked },
+                            });
+                            if (!o.ok) {
+                                toast(`The question was saved, but an option failed: ${o.error}`, "bad");
+                                return load();
+                            }
+                        }
+                        toast("Question added");
+                        load();
+                    });
+                },
+            },
+                h("h2", {}, "Add a question"),
+                h("label", { class: "field" }, "Question", text),
+                h("label", { class: "field", style: "max-width:200px" }, "Marks", marks),
+                picture.node,
+                h("div", { class: "stack" },
+                    h("strong", {}, "Answer options"),
+                    h("p", { class: "hint" }, "Type the choices and tick the one that is correct. Students will not see which one is ticked."),
+                    optionBox,
+                    h("div", {}, more)),
+                h("div", {}, submit));
+        }
+
+        async function load() {
+            const qs = await api(questionsOf(quiz.id));
+            if (!qs.ok) return body.replaceChildren(errorBox(qs.error));
+            const optionSets = await Promise.all(qs.data.map((q) => api(optionsOf(q.id))));
+
+            const existing = qs.data.length
+                ? qs.data.map((q, i) => h("article", { class: "q-block" },
+                    h("div", { class: "q-head" },
+                        h("h3", {}, `${i + 1}. ${q.question_text}`),
+                        h("span", { class: "chip" }, marksText(q.marks))),
+                    q.question_picture ? thumb(q.question_picture, `Question ${i + 1}: picture`) : null,
+                    h("ul", { class: "opt-list" }, arr(optionSets[i]).map((o) =>
+                        h("li", { class: o.is_correct ? "right" : "" },
+                            o.is_correct ? "✓ " : "",
+                            o.option_text,
+                            o.is_correct ? h("span", { class: "sr-only" }, " (correct answer)") : null)))))
+                : [empty("No questions yet", "Add the first question below.")];
+
+            body.replaceChildren(...existing, addForm());
+        }
+        load();
+    }
+
+    // Lets the teacher give marks, question by question, to each student of the quiz's class
+    function openQuizGrading(quiz, ctx) {
+        const body = h("div", {}, "Loading…");
+        dialog(`${quiz.title}: marks`, body);
+
+        function render(questions, students, grades, info) {
+            const rows = students.map((s) => {
+                const score = quizScore(questions, grades.filter((x) => x.student === s.id));
+                const inputs = questions.map((q, i) => {
+                    const pickId = info.picks.get(`${s.id}:${q.id}`);
+                    const picked = pickId == null ? null : info.options.get(pickId);
+
+                    // Already marked -> show the saved mark. Otherwise suggest one from the answer.
+                    let start = "";
+                    if (score.given.has(q.id)) start = score.given.get(q.id);
+                    else if (picked) start = picked.correct ? q.marks : 0;
+
+                    const input = h("input", {
+                        type: "number", min: "0", max: String(q.marks), step: "1", value: start,
+                        "aria-label": `Marks for ${s.name}, question ${i + 1}`,
+                    });
+                    const answer = picked
+                        ? h("span", { class: `ans ${picked.correct ? "right" : "wrong"}` }, `${picked.correct ? "✓" : "✗"} ${picked.text}`)
+                        : h("span", { class: "ans none" }, "No answer sent");
+                    return {
+                        q, i, input,
+                        node: h("div", { class: "mark-q" },
+                            h("label", { class: "mark-row" }, h("span", {}, `Question ${i + 1} (out of ${q.marks})`), input),
+                            h("div", { class: "ans-line" }, answer)),
+                    };
+                });
+
+                const save = h("button", { class: "btn sm", type: "button" }, "Save marks");
+                save.addEventListener("click", () => busy(save, async () => {
+                    const todo = inputs.filter((x) => x.input.value !== "");
+                    if (!todo.length) return toast("Enter at least one mark first.", "bad");
+                    const tooBig = todo.find((x) => Number(x.input.value) > x.q.marks);
+                    if (tooBig) return toast(`Question ${tooBig.i + 1} is only out of ${tooBig.q.marks}.`, "bad");
+
+                    // One at a time; whatever was saved before a problem stays on screen
+                    for (const x of todo) {
+                        const r = await api(API.quizGrades, {
+                            method: "POST",
+                            body: { question: x.q.id, student: s.id, grade: Number(x.input.value) },
+                        });
+                        if (!r.ok) {
+                            render(questions, students, grades, info);
+                            return toast(r.error, "bad");
+                        }
+                        const at = grades.findIndex((g) => g.question === r.data.question && g.student === r.data.student);
+                        if (at >= 0) grades.splice(at, 1);
+                        grades.push(r.data);
+                    }
+                    toast(`Marks saved for ${s.name}`);
+                    render(questions, students, grades, info);
+                }));
+
+                return h("tr", {},
+                    h("td", {}, s.name),
+                    h("td", {}, s.roll_no),
+                    h("td", {}, score.marked
+                        ? h("span", { class: "chip ok" }, `${score.got} / ${score.total}`)
+                        : h("span", { class: "chip" }, "Not marked")),
+                    h("td", {},
+                        h("details", {},
+                            h("summary", {}, "Answers and marks"),
+                            h("div", { class: "mark-grid" }, inputs.map((x) => x.node), h("div", {}, save)))));
+            });
+
+            body.replaceChildren(
+                h("p", { class: "hint" }, "Open a student to see their answers. The marks are suggested from the answers (full marks for a correct one). Change them if you like, then press Save marks."),
+                h("table", { class: "tbl" },
+                    h("thead", {}, h("tr", {}, h("th", {}, "Name"), h("th", {}, "Roll"), h("th", {}, "Total"), h("th", {}, "Answers"))),
+                    h("tbody", {}, rows)));
+        }
+
+        (async () => {
+            const [qs, gr, st, sb] = await Promise.all([
+                api(questionsOf(quiz.id)), api(API.quizGrades), api(classStudents(quiz.class_obj)), api(submitsOf(quiz.id))]);
+            if (!qs.ok) return body.replaceChildren(errorBox(qs.error));
+            if (!st.ok) return body.replaceChildren(errorBox(st.error));
+            if (!qs.data.length) return body.replaceChildren(empty("No questions yet", "Add questions to this quiz before giving marks."));
+            if (!st.data.length) return body.replaceChildren(empty("No students in this class", "Students appear here after they join."));
+
+            // The teacher's option list includes which one is correct
+            const optionSets = await Promise.all(qs.data.map((q) => api(optionsOf(q.id))));
+            const options = new Map();
+            optionSets.forEach((r) => arr(r).forEach((o) => options.set(o.id, { text: o.option_text, correct: o.is_correct })));
+            const picks = new Map(arr(sb).map((x) => [`${x.student}:${x.question}`, x.selected_option]));
+
+            render(qs.data, st.data, arr(gr), { options, picks });
+        })();
+    }
+
     const teacherViews = {
+        studentRegister: {
+            label: "Register student",
+            async render(box, ctx) {
+                box.append(pageHead(
+                    "Register a student",
+                    "Create a student login account. The role is assigned automatically, and the student can log in with this email and password."
+                ));
+
+                const username = h("input", {
+                    type: "text", required: true, maxLength: 100,
+                    autocomplete: "name", placeholder: "Student full name"
+                });
+                const email = h("input", {
+                    type: "email", required: true, autocomplete: "email",
+                    placeholder: "student@example.com"
+                });
+                const password = h("input", {
+                    type: "password", required: true, autocomplete: "new-password",
+                    placeholder: "Temporary password"
+                });
+                const roll = h("input", {
+                    type: "number", required: true, min: "1", step: "1",
+                    placeholder: "e.g. 14"
+                });
+                const grade = h("input", {
+                    type: "number", required: true, min: "1", step: "1",
+                    placeholder: "e.g. 8"
+                });
+                const picture = pictureField("Profile picture (optional)");
+                const submit = h("button", { class: "btn", type: "submit" }, "Register student");
+
+                const form = h("form", {
+                    class: "panel stack",
+                    onsubmit: (e) => {
+                        e.preventDefault();
+                        const problem = pictureProblem(picture.file);
+                        if (problem) return toast(problem, "bad");
+
+                        busy(submit, async () => {
+                            const r = await sendWithPicture(
+                                API.studentRegister,
+                                {
+                                    username: username.value.trim(),
+                                    email: email.value.trim(),
+                                    password: password.value,
+                                    roll_no: roll.value.trim(),
+                                    student_class: Number(grade.value),
+                                },
+                                "profile_picture",
+                                picture.file
+                            );
+
+                            if (!r.ok) return toast(r.error, "bad");
+                            toast("Student registered successfully. They can now log in.");
+                            form.reset();
+                            picture.input.dispatchEvent(new Event("change"));
+                        });
+                    },
+                },
+                    h("h2", {}, "Student details"),
+                    h("div", { class: "two" },
+                        h("label", { class: "field" }, "Full name", username),
+                        h("label", { class: "field" }, "Email", email)),
+                    h("div", { class: "two" },
+                        h("label", { class: "field" }, "Temporary password", password),
+                        h("label", { class: "field" }, "Roll number", roll)),
+                    h("label", { class: "field", style: "max-width:260px" }, "Grade", grade),
+                    picture.node,
+                    h("p", { class: "hint" }, "The backend sets the role to Student. You do not need to select a role here."),
+                    h("div", {}, submit)
+                );
+
+                box.append(form);
+                box.append(csvPanel());
+            },
+        },
+
+        parentRegister: {
+            label: "Register parent",
+            async render(box, ctx) {
+                box.append(pageHead(
+                    "Register a parent",
+                    "Create a parent login account and link it to their child. The role is assigned automatically, and the parent can log in with this email and password."
+                ));
+
+                const students = arr(await api(API.students, { auth: false }));
+
+                const username = h("input", {
+                    type: "text", required: true, maxLength: 100,
+                    autocomplete: "name", placeholder: "Parent full name"
+                });
+                const email = h("input", {
+                    type: "email", required: true, autocomplete: "email",
+                    placeholder: "parent@example.com"
+                });
+                const password = h("input", {
+                    type: "password", required: true, autocomplete: "new-password",
+                    placeholder: "Temporary password"
+                });
+                const child = h("select", {},
+                    h("option", { value: "" }, students.length ? "Choose the child" : "No students registered yet"),
+                    students.map((st) => h("option", { value: st.id }, `${st.name} (grade ${st.student_class}, roll ${st.roll_no})`)));
+                const picture = pictureField("Profile picture (optional)");
+                const submit = h("button", { class: "btn", type: "submit" }, "Register parent");
+
+                const form = h("form", {
+                    class: "panel stack",
+                    onsubmit: (e) => {
+                        e.preventDefault();
+                        const problem = pictureProblem(picture.file);
+                        if (problem) return toast(problem, "bad");
+
+                        busy(submit, async () => {
+                            const fields = {
+                                username: username.value.trim(),
+                                email: email.value.trim(),
+                                password: password.value,
+                            };
+                            if (child.value) fields.child = Number(child.value);
+
+                            const r = await sendWithPicture(API.parentRegister, fields, "profile_picture", picture.file);
+                            if (!r.ok) return toast(r.error, "bad");
+                            toast("Parent registered successfully. They can now log in.");
+                            form.reset();
+                            picture.input.dispatchEvent(new Event("change"));
+                        });
+                    },
+                },
+                    h("h2", {}, "Parent details"),
+                    h("div", { class: "two" },
+                        h("label", { class: "field" }, "Full name", username),
+                        h("label", { class: "field" }, "Email", email)),
+                    h("div", { class: "two" },
+                        h("label", { class: "field" }, "Temporary password", password),
+                        h("label", { class: "field" }, "Their child", child)),
+                    picture.node,
+                    h("p", { class: "hint" }, "The backend sets the role to Parent. You do not need to select a role here."),
+                    h("div", {}, submit)
+                );
+
+                box.append(form);
+            },
+        },
+
         classes: {
             label: "My classes",
             async render(box, ctx) {
@@ -789,7 +1362,74 @@
             },
         },
 
+        quizzes: {
+            label: "Quizzes",
+            async render(box, ctx) {
+                box.append(pageHead("Quizzes", "Multiple-choice quizzes for your classes. Each quiz belongs to one class."));
+
+                const [c, q] = await Promise.all([api(API.classes), api(API.quizzes)]);
+                if (!c.ok) return box.append(errorBox(c.error));
+                const mine = c.data.filter((x) => x.teacher === ctx.me.id);
+                if (!mine.length) {
+                    return box.append(empty("Create a class first", "Every quiz belongs to a class, so add a class before setting a quiz.",
+                        h("a", { class: "btn", href: "#classes" }, "Create class")));
+                }
+
+                const title = h("input", { type: "text", required: true, maxLength: 200 });
+                const description = h("textarea", { placeholder: "Optional instructions for students" });
+                const due = h("input", { type: "datetime-local", required: true, min: nowLocal() });
+                const pickClass = h("select", { required: true }, mine.map((x) =>
+                    h("option", { value: x.id }, `${x.name} (${x.grade_level ? `grade ${x.grade_level}` : "any grade"})`)));
+                const create = h("button", { class: "btn", type: "submit" }, "Create quiz");
+
+                box.append(h("form", {
+                    class: "panel stack",
+                    onsubmit: (e) => {
+                        e.preventDefault();
+                        busy(create, async () => {
+                            const r = await api(API.quizzes, {
+                                method: "POST",
+                                body: {
+                                    title: title.value.trim(),
+                                    description: description.value.trim(),
+                                    due_date: new Date(due.value).toISOString(),
+                                    class_obj: Number(pickClass.value),
+                                },
+                            });
+                            if (!r.ok) return toast(r.error, "bad");
+                            toast("Quiz created. Use \"Questions\" to add its questions.");
+                            ctx.refresh();
+                        });
+                    },
+                },
+                    h("h2", {}, "New quiz"),
+                    h("div", { class: "two" },
+                        h("label", { class: "field" }, "Title", title),
+                        h("label", { class: "field" }, "Class", pickClass)),
+                    h("label", { class: "field", style: "max-width:260px" }, "Closes on", due),
+                    h("label", { class: "field" }, "Instructions", description),
+                    h("div", {}, create)));
+
+                if (!q.ok) return box.append(errorBox(q.error));
+                if (!q.data.length) return box.append(empty("No quizzes yet", "Create the first one above."));
+
+                const sorted = [...q.data].sort((x, y) => new Date(y.due_date) - new Date(x.due_date));
+                box.append(h("div", { class: "list" }, sorted.map((quiz) =>
+                    h("div", { class: "item" },
+                        h("div", {},
+                            h("h3", {}, quiz.title),
+                            quiz.description ? h("p", {}, quiz.description) : null,
+                            h("div", { class: "chips" },
+                                quiz.class_name ? h("span", { class: "chip" }, `${quiz.class_name}${quiz.grade_level ? `, grade ${quiz.grade_level}` : ""}`) : null,
+                                h("span", { class: `chip ${isClosed(quiz) ? "late" : ""}` }, `${isClosed(quiz) ? "Closed" : "Closes"} ${fmtDateTime(quiz.due_date)}`))),
+                        h("div", { class: "side-info" },
+                            h("button", { class: "btn sm ghost", type: "button", onclick: () => openQuestions(quiz, ctx) }, "Questions"),
+                            h("button", { class: "btn sm", type: "button", onclick: () => openQuizGrading(quiz, ctx) }, "Marks"))))));
+            },
+        },
+
         notices: noticesView(true),
+        profile: profileView("teacher"),        notices: noticesView(true),
         profile: profileView("teacher"),
     };
 
@@ -908,29 +1548,17 @@
     /* ------------------------------------------------------------------
        Register page
     ------------------------------------------------------------------ */
-    async function bootRegister() {
+    function bootRegister() {
+        // Only teachers sign up here. Teachers register students and parents
+        // from inside their own dashboard.
         const form = $("#register-form");
         const error = $("#register-error");
-        const child = $("#child");
-        let role = "student";
 
-        function showRole(next) {
-            role = next;
-            form.querySelectorAll("fieldset[data-role]").forEach((fs) => {
-                const on = fs.dataset.role === role;
-                fs.hidden = !on;
-                fs.disabled = !on; // disabled fields are skipped by validation and by us
-            });
-        }
-        form.querySelectorAll('input[name="role"]').forEach((r) => r.addEventListener("change", () => showRole(r.value)));
-        showRole("student");
-
-        // Fill the "your child" list from the students API
-        const students = arr(await api(API.students, { auth: false }));
-        child.replaceChildren(
-            h("option", { value: "" }, students.length ? "Choose your child" : "No students registered yet"),
-            ...students.map((s) => h("option", { value: s.id }, `${s.name} (grade ${s.student_class}, roll ${s.roll_no})`)));
-        if (!students.length) $("#child-hint").textContent = "A student needs to register first. You can still create your account and be linked later.";
+        // If an older register.html is still in place, hide its Student/Parent
+        // parts so their empty required boxes cannot block the sign-up.
+        form.querySelectorAll("fieldset[data-role]").forEach((fs) => { fs.hidden = true; fs.disabled = true; });
+        const oldChoice = form.querySelector(".seg");
+        if (oldChoice) oldChoice.hidden = true;
 
         form.addEventListener("submit", async (e) => {
             e.preventDefault();
@@ -941,13 +1569,8 @@
                 username: $("#username").value.trim(),
                 email: $("#email").value.trim(),
                 password: $("#password").value,
-                role,
+                role: "teacher",
             };
-            if (role === "student") {
-                body.student_class = Number($("#student_class").value);
-                body.roll_no = String($("#roll_no").value);
-            }
-            if (role === "parent" && child.value) body.child = Number(child.value);
 
             // If a photo was chosen we must send a form instead of plain JSON
             const photo = $("#photo").files[0];

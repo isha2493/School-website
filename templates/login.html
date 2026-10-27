@@ -11,7 +11,7 @@
 
 <div id="login-banner" hidden></div>
 
-<form id="login-form" class="stack" novalidate>
+<form id="login-form" class="stack" novalidate onsubmit="return false;">
     <label class="field">Email
         <input type="email" id="email" autocomplete="email" required>
     </label>
@@ -22,5 +22,5 @@
     <button class="btn block" type="submit" id="login-btn">Log in</button>
 </form>
 
-<p class="auth-foot">New here? <a href="/register/">Create an account</a></p>
+<p class="auth-foot">New teacher? <a href="/register/">Create an account</a></p>
 {% endblock %}

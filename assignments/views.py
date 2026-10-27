@@ -82,7 +82,7 @@ class AssignmentView(APIView):
                     'You can only create assignments for your own classes',
                     status.HTTP_403_FORBIDDEN
                 )
-
+        
             serializer.save(teacher=teacher)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
 

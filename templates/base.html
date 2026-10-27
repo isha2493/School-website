@@ -8,11 +8,22 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+    <link rel="stylesheet" href="{% static 'css/style.css' %}?v=4">
 </head>
 <body data-page="{% block page %}{% endblock %}">
     {% block body %}{% endblock %}
     <div id="toasts" class="toasts" aria-live="polite"></div>
-    <script src="{% static 'js/app.js' %}"></script>
+    <script src="{% static 'js/app.js' %}?v=4"></script>
+    <script>
+        // If the right app.js did not load, say so instead of doing nothing.
+        if (window.__schoolApp !== "v3") {
+            var warn = document.createElement("div");
+            warn.className = "alert";
+            warn.setAttribute("role", "alert");
+            warn.style.cssText = "position:fixed;left:1rem;right:1rem;bottom:1rem;z-index:99;max-width:640px;margin:0 auto";
+            warn.textContent = "The page script did not load correctly (static/js/app.js is missing or old). Put the new app.js in the static/js folder, then press Ctrl + F5.";
+            document.body.appendChild(warn);
+        }
+    </script>
 </body>
 </html>
