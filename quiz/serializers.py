@@ -46,10 +46,32 @@ class GradeSerializer(serializers.ModelSerializer):
         }
 
 
+from rest_framework import serializers
+from .models import Submit, Option
+
+
 class SubmitSerializer(serializers.ModelSerializer):
-    student_name = serializers.CharField(source='student.person.username', read_only=True)
+    student_name = serializers.CharField(
+        source='student.person.username',
+        read_only=True
+    )
+
+    selected_options = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=Option.objects.all(),
+        allow_empty=False
+    )
 
     class Meta:
         model = Submit
-        fields = '__all__'
-        read_only_fields = ['student']
+        fields = [
+            'id',
+            'student',
+            'student_name',
+            'question',
+            'selected_options',
+            'submitted_at'
+        ]
+
+        read_only_fields = ['student', 'submitted_at']
+

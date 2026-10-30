@@ -12,8 +12,8 @@ class Quiz(models.Model):
     teacher = models.ForeignKey(
         Teacher,
         on_delete=models.CASCADE,
-
-        blank=True
+        blank=False,
+        null=False
     )
 
     class_obj = models.ForeignKey(
@@ -87,19 +87,26 @@ class Submit(models.Model):
     )
 
     student = models.ForeignKey(
-    Student,
-    on_delete=models.CASCADE,
-    related_name='quiz_submissions'
-    ) 
-
-    selected_option = models.ForeignKey(
-        Option,
+        Student,
         on_delete=models.CASCADE,
-        null=True,
-        blank=True
+        related_name='quiz_submissions'
+    )
+
+    selected_options = models.ManyToManyField(
+        Option,
+        blank=False,
+        related_name='submissions'
     )
 
     submitted_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['student', 'question'],
+                name='unique_student_question_submission'
+            )
+        ]
 
     def __str__(self):
         return f"{self.student_id} - {self.question_id}"

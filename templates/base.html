@@ -8,12 +8,12 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{% static 'css/style.css' %}?v=4">
+    <link rel="stylesheet" href="{% static 'css/style.css' %}?v=5">
 </head>
 <body data-page="{% block page %}{% endblock %}">
     {% block body %}{% endblock %}
     <div id="toasts" class="toasts" aria-live="polite"></div>
-    <script src="{% static 'js/app.js' %}?v=4"></script>
+    <script src="{% static 'js/app.js' %}?v=5"></script>
     <script>
         // If the right app.js did not load, say so instead of doing nothing.
         if (window.__schoolApp !== "v3") {

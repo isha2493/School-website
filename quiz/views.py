@@ -13,7 +13,6 @@ from .serializers import (
     GradeSerializer,
     SubmitSerializer,
 )
-
 from authentication.authentication import JWTAuthentication
 from assignments.permissions import IsTeacher, IsStudent
 from teachers.models import Teacher
@@ -332,29 +331,33 @@ class SubmitView(APIView):
           status=status.HTTP_201_CREATED
 )   
 
-
-
-class GradeView(APIView):
+class SubmitView(APIView):
     authentication_classes = [JWTAuthentication]
 
     def get_permissions(self):
-        if self.request.method in ['POST', 'PUT', 'PATCH', 'DELETE']:
-            return [IsTeacher()]
+        if self.request.method == 'POST':
+            return [IsStudent()]
+
         return []
 
+    # View submissions
     def get(self, request):
-        if request.user.role == 'student':
-            student = get_object_or_404(
-                Student, person=request.user
-            )
-            grades = Grade.objects.filter(student=student)
-
-        elif request.user.role == 'teacher':
+        if request.user.role == 'teacher':
             teacher = get_object_or_404(
                 Teacher, person=request.user
             )
-            grades = Grade.objects.filter(
+
+            submits = Submit.objects.filter(
                 question__quiz__teacher=teacher
+            )
+
+        elif request.user.role == 'student':
+            student = get_object_or_404(
+                Student, person=request.user
+            )
+
+            submits = Submit.objects.filter(
+                student=student
             )
 
         else:
@@ -363,48 +366,154 @@ class GradeView(APIView):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        serializer = GradeSerializer(grades, many=True)
+        quiz_id = request.query_params.get('quiz_id')
+
+        if quiz_id:
+            submits = submits.filter(
+                question__quiz_id=quiz_id
+            )
+
+        serializer = SubmitSerializer(submits, many=True)
+
         return Response(serializer.data)
 
+    # Submit answers and automatically calculate marks
     def post(self, request):
-        serializer = GradeSerializer(data=request.data)
+        student = get_object_or_404(
+            Student, person=request.user
+        )
+
+        serializer = SubmitSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         question = serializer.validated_data['question']
-        student = serializer.validated_data['student']
-        grade = serializer.validated_data['grade']
+        selected_options = serializer.validated_data['selected_options']
+        quiz = question.quiz
 
-        teacher = get_object_or_404(
-            Teacher, person=request.user
-        )
-
-        if question.quiz.teacher != teacher:
+        # Check that the quiz has a class
+        if not quiz.class_obj:
             return Response(
-                {"error": "You can only grade your own quizzes."},
-                status=status.HTTP_403_FORBIDDEN
+                {"error": "This quiz has no assigned class."},
+                status=status.HTTP_400_BAD_REQUEST
             )
 
-        if not question.quiz.class_obj.students.filter(
+        # Check student enrollment
+        if not quiz.class_obj.students.filter(
             id=student.id
         ).exists():
             return Response(
-                {"error": "This student is not enrolled in the quiz class."},
-                status=status.HTTP_400_BAD_REQUEST
+                {"error": "You are not enrolled in this class."},
+                status=status.HTTP_403_FORBIDDEN
             )
 
-        if grade > question.marks:
+        # Check deadline
+        if quiz.due_date <= timezone.now():
             return Response(
-                {"error": f"Marks cannot exceed {question.marks}."},
+                {"error": "The quiz deadline has passed."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        grade_obj, created = Grade.objects.update_or_create(
-            question=question,
+        for option in selected_options:
+            if option.question_id != question.id:
+                return Response(
+                    {
+                        "error": (
+                            "Selected options must belong "
+                            "to the specified question."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        if Submit.objects.filter(
             student=student,
-            defaults={'grade': grade}
+            question=question
+        ).exists():
+            return Response(
+                {
+                    "error": (
+                        "You have already submitted "
+                        "an answer for this question."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        correct_options = set(
+            Option.objects.filter(
+                question=question,
+                is_correct=True
+            ).values_list('id', flat=True)
+        )
+
+        selected_ids = {option.id for option in selected_options}
+
+        if correct_options and selected_ids == correct_options:
+            score = question.marks
+        else:
+            score = 0
+
+        submission = Submit.objects.create(
+            student=student,
+            question=question
+        )
+
+        submission.selected_options.set(selected_options)
+        Grade.objects.update_or_create(
+            student=student,
+            question=question,
+            defaults={'grade': score}
         )
 
         return Response(
-            GradeSerializer(grade_obj).data,
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+            {
+                "message": "Answer submitted successfully.",
+                "question_id": question.id,
+                "marks_obtained": score,
+                "total_marks": question.marks
+            },
+            status=status.HTTP_201_CREATED
         )
+class GradeView(APIView):
+    authentication_classes = [JWTAuthentication]
+
+    def get(self, request):
+        if request.user.role == 'teacher':
+            teacher = get_object_or_404(
+                Teacher,
+                person=request.user
+            )
+
+            grades = Grade.objects.filter(
+                question__quiz__teacher=teacher
+            )
+
+        elif request.user.role == 'student':
+            student = get_object_or_404(
+                Student,
+                person=request.user
+            )
+
+            grades = Grade.objects.filter(
+                student=student
+            )
+
+        else:
+            return Response(
+                {"error": "Not authorized."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
+        quiz_id = request.query_params.get('quiz_id')
+
+        if quiz_id:
+            grades = grades.filter(
+                question__quiz_id=quiz_id
+            )
+
+        serializer = GradeSerializer(
+            grades,
+            many=True
+        )
+
+        return Response(serializer.data)

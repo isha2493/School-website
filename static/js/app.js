@@ -555,7 +555,7 @@
 
                     if (score.marked) {
                         info.append(h("span", { class: "chip ok", title: "Your score" },
-                            score.all ? `Score ${score.got} / ${score.total}` : `Marked so far ${score.got} / ${score.total}`));
+                            score.all ? `Score ${score.got} / ${score.total}` : `Score so far ${score.got} / ${score.total}`));
                     }
                     info.append(h("button", {
                         class: `btn sm ${closed ? "ghost" : ""}`, type: "button",
@@ -630,12 +630,13 @@
 
             const given = quizScore(qs.data, arr(gr)).given;
             // What this student already answered (so the choices are ticked again)
-            const before = new Map(arr(sb).map((x) => [x.question, x.selected_option]));
+            const before = new Map(arr(sb).map((x) => [x.question, x.selected_options]));
             const names = qs.data.map((q) => `quiz-${quiz.id}-question-${q.id}`);
 
             const blocks = qs.data.map((q, i) => {
                 const marked = given.has(q.id);
-                return h("div", { class: "q-block", role: "radiogroup", "aria-label": `Question ${i + 1}` },
+                const answered = before.has(q.id);
+                return h("div", { class: "q-block", role: "group", "aria-label": `Question ${i + 1}` },
                     h("div", { class: "q-head" },
                         h("h3", {}, `${i + 1}. ${q.question_text}`),
                         h("span", { class: marked ? "chip ok" : "chip" },
@@ -643,7 +644,7 @@
                     q.question_picture ? thumb(q.question_picture, `Question ${i + 1}: picture`) : null,
                     h("div", { class: "opts" }, optionSets[i].data.map((o) =>
                         h("label", { class: "opt" },
-                            h("input", { type: "radio", name: names[i], value: o.id, disabled: closed, checked: before.get(q.id) === o.id }),
+                            h("input", { type: "checkbox", name: names[i], value: o.id, disabled: closed || answered, checked: answered && before.get(q.id).includes(o.id) }),
                             h("span", {}, o.option_text)))));
             });
 
@@ -652,22 +653,29 @@
                 class: "stack",
                 onsubmit: (e) => {
                     e.preventDefault();
+                    // Only the questions that were not answered before
                     const chosen = qs.data.map((q, i) => {
-                        const picked = form.querySelector(`input[name="${names[i]}"]:checked`);
-                        return picked ? { question: q.id, selected_option: Number(picked.value) } : null;
+                        if (before.has(q.id)) return null;
+                        const picked = [...form.querySelectorAll(`input[name="${names[i]}"]:checked`)];
+                        return picked.length ? { question: q.id, selected_options: picked.map((p) => Number(p.value)) } : null;
                     }).filter(Boolean);
 
                     if (!chosen.length) return toast("Pick at least one answer first.", "bad");
-                    if (chosen.length < qs.data.length &&
-                        !confirm(`You answered ${chosen.length} of ${qs.data.length} questions. Submit anyway?`)) return;
+                    const left = qs.data.length - before.size;
+                    if (chosen.length < left &&
+                        !confirm(`You answered ${chosen.length} of ${left} open questions. The others can't be answered later. Submit anyway?`)) return;
 
                     busy(send, async () => {
                         // One at a time, so we stop at the first problem (for example a closed quiz)
+                        let got = 0;
+                        let outOf = 0;
                         for (const answer of chosen) {
                             const r = await api(API.quizSubmits, { method: "POST", body: answer });
                             if (!r.ok) return toast(r.error, "bad");
+                            got += r.data.marks_obtained;
+                            outOf += r.data.total_marks;
                         }
-                        toast(`${chosen.length} ${chosen.length === 1 ? "answer" : "answers"} submitted`);
+                        toast(`${chosen.length} ${chosen.length === 1 ? "answer" : "answers"} checked: you got ${got} / ${outOf}`);
                         dlg.close();
                         ctx.refresh();
                     });
@@ -676,11 +684,10 @@
                 closed
                     ? h("div", { class: "alert", role: "status" }, "This quiz has closed, so answers can no longer be sent.")
                     : h("p", { class: "muted" },
-                        before.size
-                            ? `You have already answered ${before.size} of ${qs.data.length}. You can change your answers until ${fmtDateTime(quiz.due_date)}.`
-                            : `Due ${fmtDateTime(quiz.due_date)}. You can send your answers again until then.`),
+                        `Due ${fmtDateTime(quiz.due_date)}. Some questions have more than one correct answer, so tick every answer you think is right. You only get the marks if you tick exactly the correct ones. Answers are checked automatically and cannot be changed after you submit.`,
+                        before.size ? ` You have already answered ${before.size} of ${qs.data.length}.` : ""),
                 blocks,
-                closed ? null : h("div", {}, send));
+                closed || before.size === qs.data.length ? null : h("div", {}, send));
 
             body.replaceChildren(form);
         })();
@@ -855,17 +862,16 @@
             const text = h("textarea", { required: true, placeholder: "Type the question" });
             const marks = h("input", { type: "number", required: true, min: "1", step: "1", value: "1" });
             const picture = pictureField("Picture (optional)");
-            const radioName = `correct-${quiz.id}`;
             const rows = [];
             const optionBox = h("div", { class: "stack" });
             const submit = h("button", { class: "btn", type: "submit" }, "Add question");
 
             function addRow() {
                 const n = rows.length + 1;
-                const radio = h("input", { type: "radio", name: radioName, "aria-label": `Option ${n} is the correct answer` });
+                const tick = h("input", { type: "checkbox", "aria-label": `Option ${n} is a correct answer` });
                 const input = h("input", { type: "text", maxLength: 200, placeholder: `Option ${n}`, "aria-label": `Option ${n} text` });
-                rows.push({ radio, input });
-                optionBox.append(h("div", { class: "option-row" }, radio, input));
+                rows.push({ tick, input });
+                optionBox.append(h("div", { class: "option-row" }, tick, input));
             }
             for (let i = 0; i < 4; i++) addRow();
 
@@ -884,8 +890,8 @@
 
                     const filled = rows.filter((r) => r.input.value.trim());
                     if (filled.length < 2) return toast("Give at least two options.", "bad");
-                    if (filled.filter((r) => r.radio.checked).length !== 1) {
-                        return toast("Tick the option that is the correct answer (and type its text).", "bad");
+                    if (!filled.some((r) => r.tick.checked)) {
+                        return toast("Tick at least one correct answer (and type its text).", "bad");
                     }
 
                     busy(submit, async () => {
@@ -899,7 +905,7 @@
                         for (const row of filled) {
                             const o = await api(API.quizOptions, {
                                 method: "POST",
-                                body: { question: q.data.id, option_text: row.input.value.trim(), is_correct: row.radio.checked },
+                                body: { question: q.data.id, option_text: row.input.value.trim(), is_correct: row.tick.checked },
                             });
                             if (!o.ok) {
                                 toast(`The question was saved, but an option failed: ${o.error}`, "bad");
@@ -917,7 +923,7 @@
                 picture.node,
                 h("div", { class: "stack" },
                     h("strong", {}, "Answer options"),
-                    h("p", { class: "hint" }, "Type the choices and tick the one that is correct. Students will not see which one is ticked."),
+                    h("p", { class: "hint" }, "Type the choices and tick every correct one (you can tick more than one). Students will not see which are ticked. Their answers are checked automatically, and they get the marks only if they tick exactly the correct options."),
                     optionBox,
                     h("div", {}, more)),
                 h("div", {}, submit));
@@ -946,77 +952,46 @@
         load();
     }
 
-    // Lets the teacher give marks, question by question, to each student of the quiz's class
-    function openQuizGrading(quiz, ctx) {
+    // Shows the teacher what each student answered and the marks they got (checked automatically)
+    function openQuizResults(quiz, ctx) {
         const body = h("div", {}, "Loading…");
-        dialog(`${quiz.title}: marks`, body);
+        dialog(`${quiz.title}: results`, body);
 
         function render(questions, students, grades, info) {
             const rows = students.map((s) => {
                 const score = quizScore(questions, grades.filter((x) => x.student === s.id));
-                const inputs = questions.map((q, i) => {
-                    const pickId = info.picks.get(`${s.id}:${q.id}`);
-                    const picked = pickId == null ? null : info.options.get(pickId);
+                const lines = questions.map((q, i) => {
+                    const pickIds = info.picks.get(`${s.id}:${q.id}`);
 
-                    // Already marked -> show the saved mark. Otherwise suggest one from the answer.
-                    let start = "";
-                    if (score.given.has(q.id)) start = score.given.get(q.id);
-                    else if (picked) start = picked.correct ? q.marks : 0;
-
-                    const input = h("input", {
-                        type: "number", min: "0", max: String(q.marks), step: "1", value: start,
-                        "aria-label": `Marks for ${s.name}, question ${i + 1}`,
-                    });
-                    const answer = picked
-                        ? h("span", { class: `ans ${picked.correct ? "right" : "wrong"}` }, `${picked.correct ? "✓" : "✗"} ${picked.text}`)
+                    // Every option the student ticked, green if it is correct and red if not
+                    const answer = pickIds
+                        ? pickIds.map((id) => {
+                            const o = info.options.get(id);
+                            return h("div", { class: `ans ${o.correct ? "right" : "wrong"}` }, `${o.correct ? "✓" : "✗"} ${o.text}`);
+                        })
                         : h("span", { class: "ans none" }, "No answer sent");
-                    return {
-                        q, i, input,
-                        node: h("div", { class: "mark-q" },
-                            h("label", { class: "mark-row" }, h("span", {}, `Question ${i + 1} (out of ${q.marks})`), input),
-                            h("div", { class: "ans-line" }, answer)),
-                    };
+
+                    return h("div", { class: "mark-q" },
+                        h("div", { class: "mark-row" },
+                            h("span", {}, `Question ${i + 1}`),
+                            h("strong", {}, `${score.given.has(q.id) ? score.given.get(q.id) : 0} / ${q.marks}`)),
+                        h("div", { class: "ans-line" }, answer));
                 });
-
-                const save = h("button", { class: "btn sm", type: "button" }, "Save marks");
-                save.addEventListener("click", () => busy(save, async () => {
-                    const todo = inputs.filter((x) => x.input.value !== "");
-                    if (!todo.length) return toast("Enter at least one mark first.", "bad");
-                    const tooBig = todo.find((x) => Number(x.input.value) > x.q.marks);
-                    if (tooBig) return toast(`Question ${tooBig.i + 1} is only out of ${tooBig.q.marks}.`, "bad");
-
-                    // One at a time; whatever was saved before a problem stays on screen
-                    for (const x of todo) {
-                        const r = await api(API.quizGrades, {
-                            method: "POST",
-                            body: { question: x.q.id, student: s.id, grade: Number(x.input.value) },
-                        });
-                        if (!r.ok) {
-                            render(questions, students, grades, info);
-                            return toast(r.error, "bad");
-                        }
-                        const at = grades.findIndex((g) => g.question === r.data.question && g.student === r.data.student);
-                        if (at >= 0) grades.splice(at, 1);
-                        grades.push(r.data);
-                    }
-                    toast(`Marks saved for ${s.name}`);
-                    render(questions, students, grades, info);
-                }));
 
                 return h("tr", {},
                     h("td", {}, s.name),
                     h("td", {}, s.roll_no),
                     h("td", {}, score.marked
                         ? h("span", { class: "chip ok" }, `${score.got} / ${score.total}`)
-                        : h("span", { class: "chip" }, "Not marked")),
+                        : h("span", { class: "chip" }, "No answers")),
                     h("td", {},
                         h("details", {},
-                            h("summary", {}, "Answers and marks"),
-                            h("div", { class: "mark-grid" }, inputs.map((x) => x.node), h("div", {}, save)))));
+                            h("summary", {}, "See answers"),
+                            h("div", { class: "mark-grid" }, lines))));
             });
 
             body.replaceChildren(
-                h("p", { class: "hint" }, "Open a student to see their answers. The marks are suggested from the answers (full marks for a correct one). Change them if you like, then press Save marks."),
+                h("p", { class: "hint" }, "Marks are given automatically when a student submits. A question gets full marks only if the student ticked exactly the correct options."),
                 h("table", { class: "tbl" },
                     h("thead", {}, h("tr", {}, h("th", {}, "Name"), h("th", {}, "Roll"), h("th", {}, "Total"), h("th", {}, "Answers"))),
                     h("tbody", {}, rows)));
@@ -1027,14 +1002,14 @@
                 api(questionsOf(quiz.id)), api(API.quizGrades), api(classStudents(quiz.class_obj)), api(submitsOf(quiz.id))]);
             if (!qs.ok) return body.replaceChildren(errorBox(qs.error));
             if (!st.ok) return body.replaceChildren(errorBox(st.error));
-            if (!qs.data.length) return body.replaceChildren(empty("No questions yet", "Add questions to this quiz before giving marks."));
+            if (!qs.data.length) return body.replaceChildren(empty("No questions yet", "Add questions to this quiz to see results."));
             if (!st.data.length) return body.replaceChildren(empty("No students in this class", "Students appear here after they join."));
 
-            // The teacher's option list includes which one is correct
+            // The teacher's option list includes which options are correct
             const optionSets = await Promise.all(qs.data.map((q) => api(optionsOf(q.id))));
             const options = new Map();
             optionSets.forEach((r) => arr(r).forEach((o) => options.set(o.id, { text: o.option_text, correct: o.is_correct })));
-            const picks = new Map(arr(sb).map((x) => [`${x.student}:${x.question}`, x.selected_option]));
+            const picks = new Map(arr(sb).map((x) => [`${x.student}:${x.question}`, x.selected_options]));
 
             render(qs.data, st.data, arr(gr), { options, picks });
         })();
@@ -1424,7 +1399,7 @@
                                 h("span", { class: `chip ${isClosed(quiz) ? "late" : ""}` }, `${isClosed(quiz) ? "Closed" : "Closes"} ${fmtDateTime(quiz.due_date)}`))),
                         h("div", { class: "side-info" },
                             h("button", { class: "btn sm ghost", type: "button", onclick: () => openQuestions(quiz, ctx) }, "Questions"),
-                            h("button", { class: "btn sm", type: "button", onclick: () => openQuizGrading(quiz, ctx) }, "Marks"))))));
+                            h("button", { class: "btn sm", type: "button", onclick: () => openQuizResults(quiz, ctx) }, "Results"))))));
             },
         },
 
